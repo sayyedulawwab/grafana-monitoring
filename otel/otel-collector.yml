@@ -49,7 +49,7 @@ exporters:
       max_elapsed_time: 5m
     
   otlphttp/tempo:
-    endpoint: http://tempo:4318/v1/trace
+    endpoint: http://tempo:4318/v1/traces
     tls:
       insecure: true
     sending_queue:
