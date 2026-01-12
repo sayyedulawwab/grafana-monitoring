@@ -34,13 +34,33 @@ exporters:
       max_interval: 30s
       max_elapsed_time: 5m
 
-  prometheus:
-    endpoint: "0.0.0.0:9464"
-    
-  otlp/tempo:
-    endpoint: tempo:4317
+  otlphttp/prometheus:
+    endpoint: http://prometheus:9090/api/v1/otlp/v1/metrics
     tls:
       insecure: true
+    sending_queue:
+      enabled: true
+      num_consumers: 4
+      queue_size: 10000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      max_elapsed_time: 5m
+    
+  otlphttp/tempo:
+    endpoint: http://tempo:4318/v1/trace
+    tls:
+      insecure: true
+    sending_queue:
+      enabled: true
+      num_consumers: 4
+      queue_size: 10000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      max_elapsed_time: 5m
 
   debug:
     verbosity: detailed
@@ -58,9 +78,9 @@ service:
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [prometheus, debug]
+      exporters: [otlphttp/prometheus, debug]
 
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [otlp/tempo, debug]
+      exporters: [otlphttp/tempo, debug]
