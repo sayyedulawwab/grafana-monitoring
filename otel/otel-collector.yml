@@ -16,14 +16,6 @@ processors:
     limit_mib: 512
     spike_limit_mib: 128
     check_interval: 1s
-  attributes/log_labels:
-    actions:
-      - action: insert
-        key: detected_level
-        value: ${record.detected_level} # actual log attribute
-      - action: insert
-        key: RequestName
-        value: ${record.RequestName}
 
 exporters:
   otlphttp/loki:
@@ -39,9 +31,6 @@ exporters:
       initial_interval: 1s
       max_interval: 30s
       max_elapsed_time: 5m
-    labels:
-      detected_level: detected_level
-      RequestName: RequestName
 
   prometheus:
     endpoint: "0.0.0.0:9464"
