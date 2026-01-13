@@ -1,3 +1,5 @@
+# OpenTelemetry Collector configuration file
+
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133

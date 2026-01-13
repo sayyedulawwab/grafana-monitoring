@@ -1,3 +1,5 @@
+# Datasource configuration for Grafana
+
 apiVersion: 1
 
 datasources:

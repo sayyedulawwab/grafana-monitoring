@@ -1,3 +1,5 @@
+# Loki configuration file
+
 auth_enabled: false
 
 limits_config:
