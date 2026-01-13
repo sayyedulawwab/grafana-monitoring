@@ -1,3 +1,6 @@
+# Docker Compose file for Grafana Monitoring Stack
+# Includes: OpenTelemetry Collector, Loki, Prometheus, Tempo, Grafana
+
 networks:
   grafana-monitoring:
     driver: bridge
