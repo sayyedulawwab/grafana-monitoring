@@ -118,9 +118,19 @@ docker compose down
 1. **Add OpenTelemetry SDK** to your project (C#, Node.js, Java, etc.)
 2. **Configure OTLP exporter** to point to the collector:
 
-```text
-http://localhost:14318
-```
+    - Logs: http://localhost:14318/v1/logs
+    - Metrics: http://localhost:14318/v1/metrics
+    - Traces: http://localhost:14318/v1/traces
+
+    Note: If your project is another container in the same container network you have to send these with <container_name> instead of localhost like below:
+
+    - Logs: http://otel-collector:14318/v1/logs
+    - Metrics: http://otel-collector:14318/v1/metrics
+    - Traces: http://otel-collector:14318/v1/traces
+
+    Also here I didn't use the default port 4318 for the open telemetry collector because 4318 port in my machine was in the excluded port range.
+
+    I am using http/protobuf (port: 4318) instead of the grpc (port: 4317) here as some environments may not support grpc well.
 
 3. **Send telemetry data:**
 
@@ -166,7 +176,7 @@ http://localhost:14318
 
 * **Traces missing in Tempo:**
 
-  * Ensure your API is sending traces to OTLP endpoint `http://localhost:14318`.
+  * Ensure your API is sending traces to OTLP endpoint `http://localhost:14318/v1/traces`.
 
 * **Service healthchecks failing:**
 
