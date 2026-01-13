@@ -3,6 +3,25 @@ networks:
     driver: bridge
 
 services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib
+    container_name: otel-collector
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:14318:4318" # OTLP HTTP
+      - "127.0.0.1:9464:9464" # Prometheus metrics
+      - "127.0.0.1:13133:13133" # Health check
+    volumes:
+      - ./otel/otel-collector.yml:/etc/otel-collector.yml:ro
+    command: ["--config=/etc/otel-collector.yml"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:13133"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - grafana-monitoring
+
   loki:
     image: grafana/loki
     container_name: loki
@@ -20,10 +39,7 @@ services:
       test: ["CMD", "wget", "-qO-", "http://localhost:3100/ready"]
       interval: 10s
       timeout: 5s
-      retries: 30 # ~5 minutes
-    depends_on:
-      otel-collector:
-        condition: service_started
+      retries: 5
     networks:
       - grafana-monitoring
 
@@ -34,18 +50,16 @@ services:
     ports:
       - "127.0.0.1:9090:9090"
     volumes:
-      - ./prometheus/prometheus-otlp.yml:/etc/prometheus/prometheus-otlp.yml
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - ./prometheus/data:/prometheus/data
     command:
-      - "--config.file=/etc/prometheus/prometheus-otlp.yml"
+      - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus/data"
-      - "--web.enable-otlp-receiver"
-
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
       interval: 10s
       timeout: 5s
-      retries: 30 # ~5 minutes
+      retries: 5
     networks:
       - grafana-monitoring
 
@@ -63,7 +77,7 @@ services:
       test: ["CMD", "wget", "-qO-", "http://localhost:3200/ready"]
       interval: 10s
       timeout: 5s
-      retries: 30 # ~5 minutes
+      retries: 5
     networks:
       - grafana-monitoring
 
@@ -79,37 +93,8 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
-    depends_on:
-      loki:
-        condition: service_started
-      prometheus:
-        condition: service_started
-      tempo:
-        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - grafana-monitoring
-
-  otel-collector:
-    image: otel/opentelemetry-collector-contrib
-    container_name: otel-collector
-    restart: unless-stopped
-    environment:
-      OTEL_LOG_LEVEL: debug
-    ports:
-      - "127.0.0.1:14317:4317" # OTLP gRPC
-      - "127.0.0.1:14318:4318" # OTLP HTTP
-      - "127.0.0.1:9464:9464" # Prometheus metrics
-      - "127.0.0.1:13133:13133" # Health check
-    volumes:
-      - ./otel/otel-collector.yml:/etc/otel-collector.yml:ro
-    command: ["--config=/etc/otel-collector.yml"]
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:13133"]
       interval: 10s
       timeout: 5s
       retries: 5
