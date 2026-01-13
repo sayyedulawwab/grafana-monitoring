@@ -130,7 +130,7 @@ docker compose down
 
     Also here I didn't use the default port 4318 for the open telemetry collector because 4318 port in my machine was in the excluded port range.
 
-    I am using http/protobuf (port: 4318) instead of the grpc (port: 4317) here as some environments may not support grpc well.
+    I am using http/protobuf (default port: 4318) instead of the grpc (default port: 4317) here as some environments may not support grpc well.
 
 3. **Send telemetry data:**
 
