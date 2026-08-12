@@ -1,3 +1,6 @@
+# Docker Compose file for Grafana Monitoring Stack
+# Includes: OpenTelemetry Collector, Loki, Prometheus, Tempo, Grafana
+
 networks:
   grafana-monitoring:
     driver: bridge
@@ -30,8 +33,6 @@ services:
       - "3100:3100"
     volumes:
       - ./loki/data:/loki/data
-      - ./loki/chunks:/loki/chunks
-      - ./loki/rules:/loki/rules
       - ./loki/loki-config.yml:/etc/loki/config.yml:ro
     command: -config.file=/etc/loki/config.yml
     user: "0:0"
@@ -55,6 +56,7 @@ services:
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus/data"
+      - "--storage.tsdb.retention.time=7d"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
       interval: 10s
@@ -89,7 +91,7 @@ services:
       - "3000:3000"
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/data:/var/lib/grafana
+      - ./grafana/data:/var/lib/grafana/data
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: <redacted>

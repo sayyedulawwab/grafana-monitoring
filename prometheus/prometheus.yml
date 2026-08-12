@@ -1,7 +1,8 @@
-# my global config
+# Prometheus configuration file
+
 global:
-  scrape_interval: 5s
-  evaluation_interval: 5s
+  scrape_interval: 15s
+  evaluation_interval: 15s
 
 scrape_configs:
   - job_name: "otel-collector"

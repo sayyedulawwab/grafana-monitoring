@@ -1,3 +1,5 @@
+# Tempo configuration file
+
 auth_enabled: false
 
 server:
@@ -12,7 +14,7 @@ distributor:
           endpoint: 0.0.0.0:4318
 
 ingester:
-  max_block_duration: 5m
+  max_block_duration: 30m
 
 
 storage:
@@ -22,3 +24,7 @@ storage:
       path: /var/tempo/wal             # where to store the wal locally
     local:
       path: /var/tempo/blocks
+
+compactor:
+  compaction:
+    block_retention: 168h # 7 days
