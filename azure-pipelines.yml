@@ -1,0 +1,268 @@
+# Build + Release pipeline for the Grafana observability stack.
+#
+# This repo IS the stack, so the repo root maps 1:1 onto /opt/monitoring on the
+# Ubuntu VM. Both stages run on the self-hosted agent (<agent-name>), which
+# lives on that same VM - no SSH hop, no deployment group.
+#
+# Prerequisites (one-time):
+#   * bootstrap-host.sh has been run on the Ubuntu VM
+#   * Library > Variable group "monitoring-prod" exists (see Readme)
+#   * Pipelines > Environments > "monitoring-prod" exists, with an approval check
+
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  - group: monitoring-prod
+  # monitoring-prod must define:
+  #   OTEL_VERSION, LOKI_VERSION, PROMETHEUS_VERSION, TEMPO_VERSION, GRAFANA_VERSION
+  #   GF_ADMIN_USER
+  #   GF_ADMIN_PASSWORD   <- mark as secret, or link from Azure Key Vault
+  - name: deployRoot
+    value: /opt/monitoring
+  - name: artifactName
+    value: monitoring-stack
+
+stages:
+  # ---------------------------------------------------------------- BUILD ----
+  - stage: Build
+    displayName: Validate and package
+    jobs:
+      - job: validate
+        displayName: Validate configuration
+        pool:
+          name: 'Ubuntu 24.04 LTS'
+          demands:
+            - docker
+        steps:
+          - checkout: self
+            fetchDepth: 1
+
+          - bash: |
+              set -euo pipefail
+              cd "$(Build.SourcesDirectory)"
+              docker compose --env-file .env.example -f docker-compose.yml config -q
+              echo "compose file OK"
+            displayName: 'Validate docker-compose'
+
+          - bash: |
+              set -euo pipefail
+              docker run --rm \
+                -v "$(Build.SourcesDirectory)/otel:/cfg:ro" \
+                "otel/opentelemetry-collector-contrib:$(OTEL_VERSION)" \
+                validate --config=/cfg/otel-collector.yml
+              echo "collector config OK"
+            displayName: 'Validate OTel Collector config'
+
+          - bash: |
+              set -euo pipefail
+              docker run --rm \
+                -v "$(Build.SourcesDirectory)/prometheus:/cfg:ro" \
+                --entrypoint promtool \
+                "prom/prometheus:$(PROMETHEUS_VERSION)" \
+                check config /cfg/prometheus.yml
+              echo "prometheus config OK"
+            displayName: 'Validate Prometheus config'
+
+          - bash: |
+              set -euo pipefail
+              docker run --rm \
+                -v "$(Build.SourcesDirectory)/loki:/cfg:ro" \
+                "grafana/loki:$(LOKI_VERSION)" \
+                -config.file=/cfg/loki-config.yml -verify-config -target=all
+              echo "loki config OK"
+            displayName: 'Validate Loki config'
+
+          - bash: |
+              set -euo pipefail
+              docker run --rm \
+                -v "$(Build.SourcesDirectory)/tempo:/cfg:ro" \
+                "grafana/tempo:$(TEMPO_VERSION)" \
+                -config.file=/cfg/tempo.yml -config.verify
+              echo "tempo config OK"
+            displayName: 'Validate Tempo config'
+
+          - task: CopyFiles@2
+            displayName: 'Stage deployable files'
+            inputs:
+              sourceFolder: '$(Build.SourcesDirectory)'
+              # Everything except runtime state and repo metadata.
+              contents: |
+                docker-compose.yml
+                bootstrap-host.sh
+                .env.example
+                otel/**
+                loki/**
+                prometheus/**
+                tempo/**
+                grafana/**
+                !**/data/**
+                !.git/**
+              targetFolder: '$(Build.ArtifactStagingDirectory)'
+
+          - publish: '$(Build.ArtifactStagingDirectory)'
+            artifact: '$(artifactName)'
+            displayName: 'Publish artifact'
+
+  # --------------------------------------------------------------- DEPLOY ----
+  - stage: Deploy
+    displayName: Deploy to production
+    dependsOn: Build
+    condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+    jobs:
+      - deployment: deployStack
+        displayName: Deploy monitoring stack
+        environment: 'monitoring-prod'
+        pool:
+          name: 'Ubuntu 24.04 LTS'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: '$(artifactName)'
+
+                - bash: |
+                    set -euo pipefail
+                    test -d "$(deployRoot)" || {
+                      echo "##vso[task.logissue type=error]$(deployRoot) missing - run bootstrap-host.sh on this VM first"
+                      exit 1
+                    }
+                    docker info >/dev/null || {
+                      echo "##vso[task.logissue type=error]agent user cannot reach Docker - check docker group membership"
+                      exit 1
+                    }
+                    echo "host preconditions OK"
+                  displayName: 'Check host preconditions'
+
+                - bash: |
+                    set -euo pipefail
+                    STAMP=`date +%Y%m%d-%H%M%S`
+                    BACKUP="$(deployRoot)/../monitoring-backup-$STAMP"
+                    if [ -f "$(deployRoot)/docker-compose.yml" ]; then
+                      rsync -a \
+                        --exclude='.env' \
+                        --exclude='loki/data/' \
+                        --exclude='prometheus/data/' \
+                        --exclude='tempo/data/' \
+                        --exclude='grafana/data/' \
+                        "$(deployRoot)/" "$BACKUP/"
+                      ls -1dt "$(deployRoot)"/../monitoring-backup-* | tail -n +6 | xargs -r rm -rf
+                      echo "backed up current config to $BACKUP"
+                      echo "##vso[task.setvariable variable=configBackup]$BACKUP"
+                    else
+                      echo "first deployment - nothing to back up"
+                      echo "##vso[task.setvariable variable=configBackup]"
+                    fi
+                  displayName: 'Back up current config'
+
+                - bash: |
+                    set -euo pipefail
+                    umask 077
+                    ENVFILE="$(deployRoot)/.env"
+                    : > "$ENVFILE"
+                    chmod 600 "$ENVFILE"
+                    printf 'OTEL_VERSION=%s\n'       "$(OTEL_VERSION)"       >> "$ENVFILE"
+                    printf 'LOKI_VERSION=%s\n'       "$(LOKI_VERSION)"       >> "$ENVFILE"
+                    printf 'PROMETHEUS_VERSION=%s\n' "$(PROMETHEUS_VERSION)" >> "$ENVFILE"
+                    printf 'TEMPO_VERSION=%s\n'      "$(TEMPO_VERSION)"      >> "$ENVFILE"
+                    printf 'GRAFANA_VERSION=%s\n'    "$(GRAFANA_VERSION)"    >> "$ENVFILE"
+                    printf 'GF_ADMIN_USER=%s\n'      "$(GF_ADMIN_USER)"      >> "$ENVFILE"
+                    printf 'GF_ADMIN_PASSWORD=%s\n'  "$GF_ADMIN_PASSWORD"    >> "$ENVFILE"
+                    echo "wrote $ENVFILE"
+                  displayName: 'Write .env'
+                  env:
+                    # Secret variables are not auto-mapped into the shell.
+                    GF_ADMIN_PASSWORD: $(GF_ADMIN_PASSWORD)
+
+                - bash: |
+                    set -euo pipefail
+                    SRC="$(Pipeline.Workspace)/$(artifactName)"
+                    # --delete removes files dropped from the repo, but rsync
+                    # never deletes excluded paths, so data/ and .env survive.
+                    rsync -a --delete \
+                      --exclude='.env' \
+                      --exclude='loki/data/' \
+                      --exclude='prometheus/data/' \
+                      --exclude='tempo/data/' \
+                      --exclude='grafana/data/' \
+                      "$SRC/" "$(deployRoot)/"
+                    echo "--- deploy root now contains:"
+                    find "$(deployRoot)" -maxdepth 2 -not -path '*/data/*' | sort
+                  displayName: 'Sync repo to host'
+
+                - bash: |
+                    set -euo pipefail
+                    cd "$(deployRoot)"
+                    docker compose pull
+                    docker compose up -d --remove-orphans
+                    docker compose ps
+                  displayName: 'docker compose up'
+
+                - bash: |
+                    set -euo pipefail
+                    NET=monitoring_grafana-monitoring
+                    CURL="docker run --rm --network $NET curlimages/curl:latest"
+
+                    check () {  # $1 = name, $2 = url
+                      echo "--- waiting for $1"
+                      for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+                        if $CURL -fsS --max-time 5 "$2" >/dev/null 2>&1; then
+                          echo "    $1 ready"
+                          return 0
+                        fi
+                        sleep 5
+                      done
+                      echo "##vso[task.logissue type=error]$1 not ready after 150s"
+                      docker compose -f "$(deployRoot)/docker-compose.yml" logs --tail=80
+                      return 1
+                    }
+
+                    check "otel-collector" "http://otel-collector:13133"
+                    check "loki"           "http://loki:3100/ready"
+                    check "prometheus"     "http://prometheus:9090/-/healthy"
+                    check "tempo"          "http://tempo:3200/ready"
+                    check "grafana"        "http://grafana:3000/api/health"
+                  displayName: 'Wait for services to become ready'
+
+                - bash: |
+                    set -euo pipefail
+                    echo "--- OTLP endpoint published on the host?"
+                    code=`curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:14318/v1/traces -H 'Content-Type: application/json' -d '{"resourceSpans":[]}'`
+                    echo "POST /v1/traces -> HTTP $code"
+                    [ "$code" = "200" ] || exit 1
+
+                    echo "--- Grafana published on the host?"
+                    curl -fsS http://127.0.0.1:3000/api/health
+
+                    echo "--- Prometheus has a live target?"
+                    docker run --rm --network monitoring_grafana-monitoring curlimages/curl:latest \
+                      -fsS 'http://prometheus:9090/api/v1/targets?state=active' \
+                      | grep -q '"health":"up"' && echo "at least one target up"
+                  displayName: 'Smoke test published endpoints'
+
+                - bash: |
+                    set -euo pipefail
+                    echo "Deployment failed - restoring previous config"
+                    if [ -n "$(configBackup)" ] && [ -d "$(configBackup)" ]; then
+                      rsync -a --delete \
+                        --exclude='.env' \
+                        --exclude='loki/data/' \
+                        --exclude='prometheus/data/' \
+                        --exclude='tempo/data/' \
+                        --exclude='grafana/data/' \
+                        "$(configBackup)/" "$(deployRoot)/"
+                      cd "$(deployRoot)" && docker compose up -d
+                      echo "rolled back to $(configBackup)"
+                    else
+                      echo "no backup available - leaving current state in place"
+                    fi
+                  displayName: 'Roll back on failure'
+                  condition: failed()

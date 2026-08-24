@@ -1,4 +1,5 @@
-# OpenTelemetry Collector configuration file
+# OpenTelemetry Collector (contrib) - receives OTLP/HTTP from the .NET API
+# and fans out to Loki (logs), Prometheus (metrics), Tempo (traces).
 
 extensions:
   health_check:
@@ -8,16 +9,21 @@ receivers:
   otlp:
     protocols:
       http:
-        endpoint: 0.0.0.0:4318
+        endpoint: 0.0.0.0:4318   # must be 0.0.0.0; host maps 14318 -> 4318
 
 processors:
-  batch:
-    timeout: 5s
-    send_batch_size: 1024
   memory_limiter:
     limit_mib: 512
     spike_limit_mib: 128
     check_interval: 1s
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: production
+        action: insert
 
 exporters:
   otlphttp/loki:
@@ -34,9 +40,6 @@ exporters:
       max_interval: 30s
       max_elapsed_time: 5m
 
-  prometheus:
-    endpoint: "0.0.0.0:9464"
-    
   otlphttp/tempo:
     endpoint: http://tempo:4318
     tls:
@@ -51,20 +54,31 @@ exporters:
       max_interval: 30s
       max_elapsed_time: 5m
 
+  prometheus:
+    endpoint: "0.0.0.0:9464"
+    # Without this, service.name stays on target_info only and you cannot
+    # filter metrics by service in Grafana.
+    resource_to_telemetry_conversion:
+      enabled: true
+    enable_open_metrics: true   # needed for exemplars -> Tempo trace links
+
 service:
   extensions: [health_check]
+  telemetry:
+    logs:
+      level: info
   pipelines:
     logs:
       receivers: [otlp]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, resource, batch]
       exporters: [otlphttp/loki]
 
     metrics:
       receivers: [otlp]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, resource, batch]
       exporters: [prometheus]
 
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, resource, batch]
       exporters: [otlphttp/tempo]

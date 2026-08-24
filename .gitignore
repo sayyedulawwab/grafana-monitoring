@@ -1,7 +1,8 @@
-grafana/data/
-prometheus/data/
+# Runtime secrets
+.env
+
+# Container data - never commit, never deploy
 loki/data/
-loki/chunks/
-loki/rules/
-loki/retention/
+prometheus/data/
 tempo/data/
+grafana/data/

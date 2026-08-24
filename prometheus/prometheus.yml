@@ -1,11 +1,21 @@
-# Prometheus configuration file
-
+# Prometheus - scrapes the OTel Collector's prometheus exporter
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
+  external_labels:
+    environment: production
 
 scrape_configs:
   - job_name: "otel-collector"
     static_configs:
-      - targets:
-          - "otel-collector:9464"
+      - targets: ["otel-collector:9464"]
+
+  # Collector's own internal metrics: queue depth, refused/dropped spans,
+  # export failures. This is how you find out telemetry is being lost.
+  - job_name: "otel-collector-internal"
+    static_configs:
+      - targets: ["otel-collector:8888"]
+
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]

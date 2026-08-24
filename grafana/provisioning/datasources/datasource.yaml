@@ -1,22 +1,58 @@
 # Datasource configuration for Grafana
-
 apiVersion: 1
 
 datasources:
   - name: Loki
+    uid: loki
     type: loki
     access: proxy
     url: http://loki:3100
     isDefault: true
+    jsonData:
+      maxLines: 1000
+      # Loki stores the OTel trace id as structured metadata "trace_id".
+      # This turns it into a clickable link into Tempo.
+      derivedFields:
+        - name: TraceID
+          matcherType: label
+          matcherRegex: trace_id
+          datasourceUid: tempo
+          url: "${__value.raw}"
+          urlDisplayLabel: View trace
 
   - name: Prometheus
+    uid: prometheus
     type: prometheus
     access: proxy
     url: http://prometheus:9090
     isDefault: false
+    jsonData:
+      httpMethod: POST
+      timeInterval: 15s
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
 
   - name: Tempo
+    uid: tempo
     type: tempo
     access: proxy
     url: http://tempo:3200
     isDefault: false
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: "-5m"
+        spanEndTimeShift: "5m"
+        filterByTraceID: true
+        tags:
+          - key: service.name
+            value: service_name
+      tracesToMetrics:
+        datasourceUid: prometheus
+        spanStartTimeShift: "-5m"
+        spanEndTimeShift: "5m"
+      nodeGraph:
+        enabled: true
+      search:
+        hide: false
