@@ -1,14 +1,17 @@
-# MyApp Observability Stack
+# Grafana Observability Stack
 
-OpenTelemetry Collector + Loki + Prometheus + Tempo + Grafana, deployed to the
-Ubuntu VM (`<monitoring-vm>`) by Azure DevOps using the self-hosted agent
-`<agent-name>` that already runs on that VM.
+OpenTelemetry Collector + Loki + Prometheus + Tempo + Grafana, deployed to an
+Ubuntu VM by Azure DevOps using a self-hosted agent that already runs on that VM.
+
+Placeholders used below: `<monitoring-vm>` is the Ubuntu VM, `<app-server>` is the
+Windows Server running the .NET API, `<agent-user>` is the Azure DevOps agent's
+Linux user, and `MyApp.WebApi` is the instrumented service.
 
 ```
-Windows Server <app-server>          Desktop <desktop-ip>
-  MyApp.WebApi  ──OTLP/HTTP──┐            │
+Windows Server <app-server>         Desktop (LAN)
+  MyApp.WebApi ──OTLP/HTTP──┐            │
                             ▼            ▼
-              <monitoring-vm>:14318   <monitoring-vm>:3000
+            <monitoring-vm>:14318   <monitoring-vm>:3000
                             │            │
    ┌────────────────────────┼────────────┼──────────────┐
    │ docker network: monitoring_grafana-monitoring      │
@@ -48,7 +51,7 @@ excluded from every rsync, so no deploy can wipe your telemetry history.
 ```bash
 scp bootstrap-host.sh <agent-user>@<monitoring-vm>:~
 ssh <agent-user>@<monitoring-vm>
-sudo bash bootstrap-host.sh
+sudo AGENT_USER=<agent-user> WIN_SERVER=<app-server> DESKTOP_CIDR=<lan-cidr> bash bootstrap-host.sh
 sudo systemctl restart 'vsts.agent.*'
 sudo -u <agent-user> docker ps      # must succeed without sudo
 ```
@@ -70,6 +73,7 @@ processes actually run as, adds `<agent-user>` to the `docker` group, and opens 
 | `GRAFANA_VERSION` | `12.0.2` | |
 | `GF_ADMIN_USER` | `admin` | |
 | `GF_ADMIN_PASSWORD` | — | **mark as secret**, or link from Key Vault |
+| `GF_ROOT_URL` | `http://<monitoring-vm>:3000` | Grafana's public URL; defaults to `http://localhost:3000` |
 
 Confirm the tags exist before the first run (`docker pull grafana/loki:3.5.0`).
 Version bumps are now a variable-group edit plus a re-run — no code change.
@@ -167,7 +171,7 @@ taking effect — check the collector logs.
 | 3 | Grafana volume mounted at `/var/lib/grafana/data` | corrected to `/var/lib/grafana`. As written, `grafana.db` was **not** persisted — every restart lost users and dashboards |
 | 4 | Healthchecks call `wget` | removed. The collector and Tempo images are distroless — no shell, no wget — so those healthchecks fail permanently and the container reports unhealthy forever. Readiness is checked from the pipeline instead |
 | 5 | Images unpinned (`grafana/loki`, `prom/prometheus`, …) | pinned via `.env` so a redeploy can't silently pull a breaking major version |
-| 6 | `GF_SECURITY_ADMIN_PASSWORD: <redacted>` in the compose file | moved to a secret variable, injected via `.env` at deploy time |
+| 6 | Grafana admin password hard-coded in the compose file | moved to a secret variable, injected via `.env` at deploy time |
 | 7 | No `resource_to_telemetry_conversion` on the Prometheus exporter | added — without it `service.name` never becomes a metric label |
 | 8 | `user: "0:0"` on Loki, root-owned data dirs | data dirs chowned to real container UIDs; all containers run non-root |
 | 9 | Datasources had no correlation config | added Loki→Tempo derived field, Tempo→Loki `tracesToLogsV2`, Prometheus exemplars→Tempo |

@@ -1,8 +1,8 @@
 # Build + Release pipeline for the Grafana observability stack.
 #
 # This repo IS the stack, so the repo root maps 1:1 onto /opt/monitoring on the
-# Ubuntu VM. Both stages run on the self-hosted agent (<agent-name>), which
-# lives on that same VM - no SSH hop, no deployment group.
+# Ubuntu VM. Both stages run on the self-hosted agent, which lives on that
+# same VM - no SSH hop, no deployment group.
 #
 # Prerequisites (one-time):
 #   * bootstrap-host.sh has been run on the Ubuntu VM
@@ -25,6 +25,8 @@ variables:
   #   OTEL_VERSION, LOKI_VERSION, PROMETHEUS_VERSION, TEMPO_VERSION, GRAFANA_VERSION
   #   GF_ADMIN_USER
   #   GF_ADMIN_PASSWORD   <- mark as secret, or link from Azure Key Vault
+  # and may define:
+  #   GF_ROOT_URL         Grafana's public URL (compose defaults to http://localhost:3000)
   - name: deployRoot
     value: /opt/monitoring
   - name: artifactName
@@ -176,11 +178,16 @@ stages:
                     printf 'GRAFANA_VERSION=%s\n'    "$(GRAFANA_VERSION)"    >> "$ENVFILE"
                     printf 'GF_ADMIN_USER=%s\n'      "$(GF_ADMIN_USER)"      >> "$ENVFILE"
                     printf 'GF_ADMIN_PASSWORD=%s\n'  "$GF_ADMIN_PASSWORD"    >> "$ENVFILE"
+                    if [ -n "${GF_ROOT_URL:-}" ]; then
+                      printf 'GF_ROOT_URL=%s\n'      "$GF_ROOT_URL"          >> "$ENVFILE"
+                    fi
                     echo "wrote $ENVFILE"
                   displayName: 'Write .env'
                   env:
                     # Secret variables are not auto-mapped into the shell.
                     GF_ADMIN_PASSWORD: $(GF_ADMIN_PASSWORD)
+                    # GF_ROOT_URL is not secret, so it is already in the
+                    # environment when defined and unset otherwise.
 
                 - bash: |
                     set -euo pipefail

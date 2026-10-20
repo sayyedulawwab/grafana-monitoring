@@ -1,7 +1,7 @@
-# Grafana monitoring stack - production (Ubuntu VM <monitoring-vm>)
+# Grafana monitoring stack - production (Ubuntu VM)
 #
 # Only two host ports are published:
-#   14318 -> OTLP HTTP  (from Windows Server <app-server>)
+#   14318 -> OTLP HTTP  (from the Windows Server running the API)
 #   3000  -> Grafana    (from desktop / LAN)
 # Loki, Prometheus and Tempo stay on the Docker network only.
 #
@@ -87,7 +87,7 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: ${GF_ADMIN_USER}
       GF_SECURITY_ADMIN_PASSWORD: ${GF_ADMIN_PASSWORD}
-      GF_SERVER_ROOT_URL: http://<monitoring-vm>:3000
+      GF_SERVER_ROOT_URL: ${GF_ROOT_URL:-http://localhost:3000}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
     depends_on:
